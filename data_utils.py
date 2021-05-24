@@ -29,10 +29,12 @@ class TextMelLoader(torch.utils.data.Dataset):
 
     def get_mel_text_pair(self, audiopath_and_text):
         # separate filename and text
-        audiopath, text = audiopath_and_text[0], audiopath_and_text[1]
+        audiopath, text, accent = audiopath_and_text[0], audiopath_and_text[1], audiopath_and_text[2]
+        accent = accent.split(',')
         text = self.get_text(text)
+        accent = self.get_accent(accent)
         mel = self.get_mel(audiopath)
-        return (text, mel)
+        return (text, mel, accent)
 
     def get_mel(self, filename):
         if not self.load_mel_from_disk:
@@ -56,6 +58,10 @@ class TextMelLoader(torch.utils.data.Dataset):
     def get_text(self, text):
         text_norm = torch.IntTensor(text_to_sequence(text, self.text_cleaners))
         return text_norm
+
+    def get_accent(self, accent):
+        accent = torch.IntTensor(accent)
+        return accent
 
     def __getitem__(self, index):
         return self.get_mel_text_pair(self.audiopaths_and_text[index])
@@ -88,6 +94,17 @@ class TextMelCollate():
             text = batch[ids_sorted_decreasing[i]][0]
             text_padded[i, :text.size(0)] = text
 
+        accent_lengths, ids_sorted_decreasing_accent = torch.sort(
+            torch.LongTensor([len(x[2]) for x in batch]),
+            dim=0, descending=True)
+        max_accent_len = accent_lengths[0]
+
+        accent_padded = torch.LongTensor(len(batch), max_accent_len)
+        accent_padded.zero_()
+        for i in range(len(ids_sorted_decreasing_accent)):
+            accent = batch[ids_sorted_decreasing_accent[i]][0]
+            accent_padded[i, :accent.size(0)] = accent
+
         # Right zero-pad mel-spec
         num_mels = batch[0][1].size(0)
         max_target_len = max([x[1].size(1) for x in batch])
@@ -108,4 +125,4 @@ class TextMelCollate():
             output_lengths[i] = mel.size(1)
 
         return text_padded, input_lengths, mel_padded, gate_padded, \
-            output_lengths
+            output_lengths, accent_padded, accent_lengths
