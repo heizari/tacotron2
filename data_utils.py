@@ -98,6 +98,7 @@ class TextMelCollate():
             torch.LongTensor([len(x[2]) for x in batch]),
             dim=0, descending=True)
         max_accent_len = accent_lengths[0]
+        assert max_accent_len == max_input_len, 'diff length accent and input'
 
         accent_padded = torch.LongTensor(len(batch), max_accent_len)
         accent_padded.zero_()
@@ -125,4 +126,4 @@ class TextMelCollate():
             output_lengths[i] = mel.size(1)
 
         return text_padded, input_lengths, mel_padded, gate_padded, \
-            output_lengths, accent_padded, accent_lengths
+            output_lengths, accent_padded

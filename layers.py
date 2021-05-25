@@ -17,6 +17,23 @@ class LinearNorm(torch.nn.Module):
     def forward(self, x):
         return self.linear_layer(x)
 
+class ConvBatchNorm(torch.nn.Module):
+    def __init__(self, in_dim, out_dim, kernel_size, stride, padding, activation=None):
+        super(ConvBatchNorm, self).__init__()
+        self.conv1d = torch.nn.Conv1d(
+            in_dim, out_dim, kernel_size=kernel_size,\
+            stride=stride, padding=padding,bias=False
+        )
+        self.bn = torch.nn.BatchNorm1d(out_dim)
+        self.activation = activation
+
+    def forward(self, x):
+        x = self.conv1d(x)
+        if self.activation is not None:
+            x = self.activation(x)
+
+        return self.bn(x)
+
 
 class ConvNorm(torch.nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=1, stride=1,

@@ -46,13 +46,13 @@ def create_hparams(hparams_string=None, verbose=False):
         ################################
         n_symbols=len(symbols),
         accent_embedding_dim=64,
-        symbols_embedding_dim=512,
+        symbols_embedding_dim=448,
         train_symbols_embedding_dim=512-64,
 
         # Encoder parameters
         encoder_kernel_size=5,
         encoder_n_convolutions=3,
-        encoder_embedding_dim=512,
+        encoder_embedding_dim=256,
 
         # Decoder parameters
         n_frames_per_step=1,  # currently only 1 is supported

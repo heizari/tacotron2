@@ -3,7 +3,7 @@ import torch
 from torch.autograd import Variable
 from torch import nn
 from torch.nn import functional as F
-from layers import ConvNorm, LinearNorm
+from layers import ConvBatchNorm, ConvNorm, LinearNorm
 from utils import to_gpu, get_mask_from_lengths
 
 
@@ -43,7 +43,7 @@ class Attention(nn.Module):
     def get_alignment_energies(self, query, processed_memory,
                                attention_weights_cat):
         """
-        PARAMS
+        PARAMs
         ------
         query: decoder output (batch, n_mel_channels * n_frames_per_step)
         processed_memory: processed encoder outputs (B, T_in, attention_dim)
@@ -97,6 +97,82 @@ class Prenet(nn.Module):
     def forward(self, x):
         for linear in self.layers:
             x = F.dropout(F.relu(linear(x)), p=0.5, training=True)
+        return x
+
+class Highway(nn.Module):
+    def __init__(self, in_size, out_size):
+
+        super(Highway, self).__init__()
+
+        self.nonlinear = nn.Linear(in_size, out_size)
+        self.gate = nn.Linear(in_size, out_size)
+        self.relu = nn.ReLU()
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        """
+            :param x: tensor with shape of [batch_size, size]
+            :return: tensor with shape of [batch_size, size]
+            applies σ(x) ⨀ (f(G(x))) + (1 - σ(x)) ⨀ (Q(x)) transformation | G and Q is affine transformation,
+            f is non-linear transformation, σ(x) is affine transformation with sigmoid non-linearition
+            and ⨀ is element-wise multiplication
+            """
+
+        gate = self.sigmoid(self.gate(x))
+        nonlinear = self.relu(self.nonlinear(x))
+        x = gate * nonlinear + (1 - gate) * x
+
+        return x
+
+class CBH(nn.Module):
+    def __init__(self, in_dim, K=16, projection=[128, 128]):
+        super(CBH, self).__init__()
+        self.in_dim = in_dim
+        self.relu = nn.ReLU()
+
+        self.conv1d_bank = nn.Modulelist(
+            [ConvBatchNorm(
+                in_dim, in_dim, kernel_size=k, stride=1, padding=k//2, \
+                activation=self.relu)
+            for k in range(1, K+1)]
+        )
+        self.maxpool1d = nn.MaxPool1d(kernel_size=2, stride=1,padding=1)
+
+        in_sizes = [K * in_dim] + projection[:-1]
+        activations = [self.relu] * (len(projection) -1) + [None]
+        self.conv1d_projection = nn.Modulelist(
+            [ConvBatchNorm(in_dim=in_size, out_dim=out_size, kernel_size=3,\
+                stride=1, padding=1, activation=ac)
+            for (in_size, out_size, ac) in zip(
+                in_sizes, projection, activations)]
+        )
+        self.projection_end = nn.Liner(projection[-1], in_dim, bias=False)
+
+        self.highway = nn.ModuleList(
+            [Highway(in_size=in_dim, out_size=in_dim) for _ in range(4)]
+        )
+
+    def forward(self, input):
+        x = input
+        if x.size(-1) == self.in_dim:
+            x = x.transpose(1, 2)
+
+        T = x.size(-1)
+        x = torch.cat([conv1d(x)[:, :, :T] for conv1d in self.conv1d_bank], dim=1)
+        assert x.size(1) == self.in_dim * len(self.conv1d_banks)
+        x = self.max_pool1d(x)[:, :, :T]
+
+        for conv1d in self.conv1d_projection:
+            x = conv1d(x)
+
+        if x.size(-1) != self.in_dim:
+            x = self.projection_end(x)
+
+        x += input
+
+        for highway in self.highway:
+            x = highway(x)
+
         return x
 
 
@@ -154,27 +230,37 @@ class Encoder(nn.Module):
     def __init__(self, hparams):
         super(Encoder, self).__init__()
 
-        convolutions = []
-        for _ in range(hparams.encoder_n_convolutions):
-            conv_layer = nn.Sequential(
-                ConvNorm(hparams.encoder_embedding_dim,
-                         hparams.encoder_embedding_dim,
-                         kernel_size=hparams.encoder_kernel_size, stride=1,
-                         padding=int((hparams.encoder_kernel_size - 1) / 2),
-                         dilation=1, w_init_gain='relu'),
-                nn.BatchNorm1d(hparams.encoder_embedding_dim))
-            convolutions.append(conv_layer)
-        self.convolutions = nn.ModuleList(convolutions)
+        self.prenet_text = Prenet(
+            hparams.symbols_embedding_dim,
+            [hparams.symbols_embedding_dim, int(hparams.symbols_embedding_dim/2)])
+        self.prenet_accent = Prenet(
+            hparams.accent_embedding_dim,
+            [hparams.accent_embedding_dim, int(hparams.accent_embedding_dim/2)])
+        # convolutions = []
+        # for _ in range(hparams.encoder_n_convolutions):
+            # conv_layer = nn.Sequential(
+                # ConvNorm(hparams.encoder_embedding_dim,
+                        #  hparams.encoder_embedding_dim,
+                        #  kernel_size=hparams.encoder_kernel_size, stride=1,
+                        #  padding=int((hparams.encoder_kernel_size - 1) / 2),
+                        #  dilation=1, w_init_gain='relu'),
+                # nn.BatchNorm1d(hparams.encoder_embedding_dim))
+            # convolutions.append(conv_layer)
+        # self.convolutions = nn.ModuleList(convolutions)
+
+        self.cbh = CBH( in_dim=hparams.encoder_embedding_dim,K=16,
+            projection=[hparams.encoder_embedding_dim]*2)
 
         self.lstm = nn.LSTM(hparams.encoder_embedding_dim,
-                            int(hparams.encoder_embedding_dim / 2), 1,
+                            int(hparams.encoder_embedding_dim * 2), 1,
                             batch_first=True, bidirectional=True)
 
-    def forward(self, x, input_lengths):
-        for conv in self.convolutions:
-            x = F.dropout(F.relu(conv(x)), 0.5, self.training)
+    def forward(self, x, input_lengths, accent):
+        x = self.prenet_text(x)
+        accent = self.prenet_accent(accent)
+        x = torch.cat(x, accent, dim=-1)
 
-        x = x.transpose(1, 2)
+        x = self.cbh(x)
 
         # pytorch tensor are not reversible, hence the conversion
         input_lengths = input_lengths.cpu().numpy()
@@ -476,7 +562,7 @@ class Tacotron2(nn.Module):
 
     def parse_batch(self, batch):
         text_padded, input_lengths, mel_padded, gate_padded, \
-            output_lengths, accent_padded, accent_lengths = batch
+            output_lengths, accent_padded = batch
         text_padded = to_gpu(text_padded).long()
         input_lengths = to_gpu(input_lengths).long()
         max_len = torch.max(input_lengths.data).item()
@@ -484,11 +570,10 @@ class Tacotron2(nn.Module):
         gate_padded = to_gpu(gate_padded).float()
         output_lengths = to_gpu(output_lengths).long()
         accent_padded = to_gpu(accent_padded).long()
-        accent_lengths = to_gpu(accent_lengths).long()
 
         return (
             (text_padded, input_lengths, mel_padded, max_len, output_lengths, \
-                accent_padded, accent_lengths),
+                accent_padded),
             (mel_padded, gate_padded))
 
     def parse_output(self, outputs, output_lengths=None):
@@ -504,13 +589,12 @@ class Tacotron2(nn.Module):
         return outputs
 
     def forward(self, inputs):
-        text_inputs, text_lengths, mels, max_len, output_lengths, accent_inputs, \
-            accent_lengths = inputs
-        text_lengths, output_lengths, accent_lengths = text_lengths.data, output_lengths.data, accent_lengths.data
+        text_inputs, text_lengths, mels, max_len, output_lengths, accent_inputs = inputs
+        text_lengths, output_lengths= text_lengths.data, output_lengths.data
 
         embedded_inputs = self.embedding_text(text_inputs).transpose(1, 2)
         embedded_accent = self.embedding_accent(accent_inputs).transpose(1,2)
-        encoder_outputs = self.encoder(embedded_inputs, text_lengths, embedded_accent, accent_lengths)
+        encoder_outputs = self.encoder(embedded_inputs, text_lengths, embedded_accent)
 
         mel_outputs, gate_outputs, alignments = self.decoder(
             encoder_outputs, mels, memory_lengths=text_lengths)
