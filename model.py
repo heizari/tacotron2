@@ -315,7 +315,7 @@ class Encoder(nn.Module):
             projection=[hparams.encoder_cbh_dim]*2)
 
         self.lstm = nn.LSTM(hparams.encoder_cbh_dim,
-                            int(hparams.encoder_embedding_dim), 1,
+                            int(hparams.encoder_embedding_dim /2), 1,
                             batch_first=True, bidirectional=True)
 
     def forward(self, x, input_lengths, accent):
