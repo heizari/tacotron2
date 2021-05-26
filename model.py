@@ -193,23 +193,23 @@ class CBH(nn.Module):
         self.in_dim = in_dim
         self.relu = nn.ReLU()
 
-        self.conv1d_bank = nn.Modulelist(
+        self.conv1d_banks = nn.ModuleList(
             [ConvBatchNorm(
                 in_dim, in_dim, kernel_size=k, stride=1, padding=k//2, \
                 activation=self.relu)
             for k in range(1, K+1)]
         )
-        self.maxpool1d = nn.MaxPool1d(kernel_size=2, stride=1,padding=1)
+        self.max_pool1d = nn.MaxPool1d(kernel_size=2, stride=1,padding=1)
 
         in_sizes = [K * in_dim] + projection[:-1]
         activations = [self.relu] * (len(projection) -1) + [None]
-        self.conv1d_projection = nn.Modulelist(
+        self.conv1d_projection = nn.ModuleList(
             [ConvBatchNorm(in_dim=in_size, out_dim=out_size, kernel_size=3,\
                 stride=1, padding=1, activation=ac)
             for (in_size, out_size, ac) in zip(
                 in_sizes, projection, activations)]
         )
-        self.projection_end = nn.Liner(projection[-1], in_dim, bias=False)
+        self.projection_end = nn.Linear(projection[-1], in_dim, bias=False)
 
         self.highway = nn.ModuleList(
             [Highway(in_size=in_dim, out_size=in_dim) for _ in range(4)]
@@ -221,13 +221,14 @@ class CBH(nn.Module):
             x = x.transpose(1, 2)
 
         T = x.size(-1)
-        x = torch.cat([conv1d(x)[:, :, :T] for conv1d in self.conv1d_bank], dim=1)
+        x = torch.cat([conv1d(x)[:, :, :T] for conv1d in self.conv1d_banks], dim=1)
         assert x.size(1) == self.in_dim * len(self.conv1d_banks)
         x = self.max_pool1d(x)[:, :, :T]
 
         for conv1d in self.conv1d_projection:
             x = conv1d(x)
 
+        x = x.transpose(1,2)
         if x.size(-1) != self.in_dim:
             x = self.projection_end(x)
 
@@ -319,9 +320,9 @@ class Encoder(nn.Module):
                             batch_first=True, bidirectional=True)
 
     def forward(self, x, input_lengths, accent):
-        x = self.prenet_text(x)
         accent = self.prenet_accent(accent)
-        x = torch.cat(x, accent, dim=-1)
+        x = self.prenet_text(x)
+        x = torch.cat([x, accent], dim=-1)
 
         x = self.cbh(x)
 
@@ -430,7 +431,7 @@ class Decoder(nn.Module):
             B, MAX_TIME).zero_())
         self.attention_weights_cum = Variable(memory.data.new(
             B, MAX_TIME).zero_())
-        self.log_alpha = memory.new_zeros(B, MAX_TIME).fil_(-float(1e20))
+        self.log_alpha = memory.new_zeros(B, MAX_TIME).fill_(-float(1e20))
         self.log_alpha[:, 0].fill_(0.)
         self.attention_context = Variable(memory.data.new(
             B, self.encoder_embedding_dim).zero_())
@@ -553,6 +554,7 @@ class Decoder(nn.Module):
             memory, mask=~get_mask_from_lengths(memory_lengths))
 
         mel_outputs, gate_outputs, alignments = [], [], []
+        print(decoder_inputs.size(0))
         while len(mel_outputs) < decoder_inputs.size(0) - 1:
             decoder_input = decoder_inputs[len(mel_outputs)]
             mel_output, gate_output, attention_weights = self.decode(
@@ -615,7 +617,7 @@ class Tacotron2(nn.Module):
         self.embedding = nn.Embedding(
             hparams.n_symbols, hparams.symbols_embedding_dim)
         self.embedding_text = nn.Embedding(
-            hparams.n_symbols, hparams.train_symbols_embedding_dim)
+            hparams.n_symbols, hparams.symbols_embedding_dim)
         self.embedding_accent = nn.Embedding(
             hparams.n_symbols, hparams.accent_embedding_dim)
         std = sqrt(2.0 / (hparams.n_symbols + hparams.symbols_embedding_dim))
@@ -657,8 +659,8 @@ class Tacotron2(nn.Module):
         text_inputs, text_lengths, mels, max_len, output_lengths, accent_inputs = inputs
         text_lengths, output_lengths= text_lengths.data, output_lengths.data
 
-        embedded_inputs = self.embedding_text(text_inputs).transpose(1, 2)
-        embedded_accent = self.embedding_accent(accent_inputs).transpose(1,2)
+        embedded_inputs = self.embedding_text(text_inputs)
+        embedded_accent = self.embedding_accent(accent_inputs)
         encoder_outputs = self.encoder(embedded_inputs, text_lengths, embedded_accent)
 
         mel_outputs, gate_outputs, alignments = self.decoder(

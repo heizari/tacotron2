@@ -9,7 +9,6 @@ from distributed import apply_gradient_allreduce
 import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
-from torchsummary import summary
 
 from model import Tacotron2
 from data_utils import TextMelLoader, TextMelCollate
@@ -200,7 +199,6 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
                 learning_rate = _learning_rate
             iteration += 1  # next iteration is iteration + 1
             epoch_offset = max(0, int(iteration / len(train_loader)))
-    summary(model,(1,10,10,10,10,10,128))
     model.train()
     is_overflow = False
     # ================ MAIN TRAINNIG LOOP! ===================

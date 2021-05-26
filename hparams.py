@@ -25,8 +25,8 @@ def create_hparams(hparams_string=None, verbose=False):
         # Data Parameters             #
         ################################
         load_mel_from_disk=False,
-        training_files='/home/wsato/work/bolster/nvidia_tacotron2/datasets/transcript_train.txt',
-        validation_files='/home/wsato/work/bolster/nvidia_tacotron2/datasets/transcript_val.txt',
+        training_files='./train_set.txt',
+        validation_files='./val_set.txt',
         text_cleaners=['english_cleaners'],
 
         ################################
@@ -52,7 +52,7 @@ def create_hparams(hparams_string=None, verbose=False):
         # Encoder parameters
         encoder_kernel_size=5,
         encoder_n_convolutions=3,
-        encoder_cbh_dim=256
+        encoder_cbh_dim=256,
         encoder_embedding_dim=512,
 
         # Decoder parameters
@@ -84,7 +84,7 @@ def create_hparams(hparams_string=None, verbose=False):
         learning_rate=1e-3,
         weight_decay=1e-6,
         grad_clip_thresh=1.0,
-        batch_size=8,
+        batch_size=64,
         mask_padding=True  # set model's padded outputs to padded values
     )
 

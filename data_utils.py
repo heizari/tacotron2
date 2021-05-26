@@ -60,6 +60,7 @@ class TextMelLoader(torch.utils.data.Dataset):
         return text_norm
 
     def get_accent(self, accent):
+        accent = [int(acc) for acc in accent]
         accent = torch.IntTensor(accent)
         return accent
 
