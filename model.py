@@ -311,11 +311,11 @@ class Encoder(nn.Module):
             # convolutions.append(conv_layer)
         # self.convolutions = nn.ModuleList(convolutions)
 
-        self.cbh = CBH( in_dim=hparams.encoder_embedding_dim,K=16,
-            projection=[hparams.encoder_embedding_dim]*2)
+        self.cbh = CBH( in_dim=hparams.encoder_cbh_dim,K=16,
+            projection=[hparams.encoder_cbh_dim]*2)
 
-        self.lstm = nn.LSTM(hparams.encoder_embedding_dim,
-                            int(hparams.encoder_embedding_dim * 2), 1,
+        self.lstm = nn.LSTM(hparams.encoder_cbh_dim,
+                            int(hparams.encoder_embedding_dim), 1,
                             batch_first=True, bidirectional=True)
 
     def forward(self, x, input_lengths, accent):
