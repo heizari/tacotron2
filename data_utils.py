@@ -30,10 +30,11 @@ class TextMelLoader(torch.utils.data.Dataset):
     def get_mel_text_pair(self, audiopath_and_text):
         # separate filename and text
         audiopath, text, accent = audiopath_and_text[0], audiopath_and_text[1], audiopath_and_text[2]
-        accent = accent.split(',')
-        text = self.get_text(text)
         accent = self.get_accent(accent)
+        assert len(text) == len(accent), f'diff lengths text({len(text)}), accent({len(accent)})\n{text}\n{accent}\n{audiopath}'
+        text = self.get_text(text)
         mel = self.get_mel(audiopath)
+        assert len(text) == len(accent), f'diff lengths text({len(text)}), accent({len(accent)})\n{text}\n{accent}\n{audiopath}'
         return (text, mel, accent)
 
     def get_mel(self, filename):
@@ -60,6 +61,7 @@ class TextMelLoader(torch.utils.data.Dataset):
         return text_norm
 
     def get_accent(self, accent):
+        accent = accent.split(',')
         accent = [int(acc) for acc in accent]
         accent = torch.IntTensor(accent)
         return accent
@@ -99,7 +101,7 @@ class TextMelCollate():
             torch.LongTensor([len(x[2]) for x in batch]),
             dim=0, descending=True)
         max_accent_len = accent_lengths[0]
-        assert max_accent_len == max_input_len, 'diff length accent and input'
+        assert max_accent_len == max_input_len, f'[batch]diff length accent({max_accent_len}) and input({max_input_len})'
 
         accent_padded = torch.LongTensor(len(batch), max_accent_len)
         accent_padded.zero_()

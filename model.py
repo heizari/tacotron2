@@ -554,7 +554,6 @@ class Decoder(nn.Module):
             memory, mask=~get_mask_from_lengths(memory_lengths))
 
         mel_outputs, gate_outputs, alignments = [], [], []
-        print(decoder_inputs.size(0))
         while len(mel_outputs) < decoder_inputs.size(0) - 1:
             decoder_input = decoder_inputs[len(mel_outputs)]
             mel_output, gate_output, attention_weights = self.decode(
