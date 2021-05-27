@@ -97,7 +97,7 @@ class ForwardAttentionV2(nn.Module):
         self.location_layer = LocationLayer(attention_location_n_filters,
                                             attention_location_kernel_size,
                                             attention_dim)
-        self.score_mask_value = -float(1e20)
+        self.score_mask_value = -float('inf')
 
     def get_alignment_energies(self, query, processed_memory,
                                attention_weights_cat):
@@ -421,7 +421,7 @@ class Decoder(nn.Module):
             B, MAX_TIME).zero_())
         self.attention_weights_cum = Variable(memory.data.new(
             B, MAX_TIME).zero_())
-        self.log_alpha = memory.new_zeros(B, MAX_TIME).fill_(-float(1e20))
+        self.log_alpha = memory.new_zeros(B, MAX_TIME).fill_(-float('inf'))
         self.log_alpha[:, 0].fill_(0.)
         self.attention_context = Variable(memory.data.new(
             B, self.encoder_embedding_dim).zero_())
