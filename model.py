@@ -300,17 +300,6 @@ class Encoder(nn.Module):
         self.prenet_accent = Prenet(
             hparams.accent_embedding_dim,
             [hparams.accent_embedding_dim, int(hparams.accent_embedding_dim/2)])
-        # convolutions = []
-        # for _ in range(hparams.encoder_n_convolutions):
-            # conv_layer = nn.Sequential(
-                # ConvNorm(hparams.encoder_embedding_dim,
-                        #  hparams.encoder_embedding_dim,
-                        #  kernel_size=hparams.encoder_kernel_size, stride=1,
-                        #  padding=int((hparams.encoder_kernel_size - 1) / 2),
-                        #  dilation=1, w_init_gain='relu'),
-                # nn.BatchNorm1d(hparams.encoder_embedding_dim))
-            # convolutions.append(conv_layer)
-        # self.convolutions = nn.ModuleList(convolutions)
 
         self.cbh = CBH( in_dim=hparams.encoder_cbh_dim,K=16,
             projection=[hparams.encoder_cbh_dim]*2)
@@ -339,11 +328,12 @@ class Encoder(nn.Module):
 
         return outputs
 
-    def inference(self, x):
-        for conv in self.convolutions:
-            x = F.dropout(F.relu(conv(x)), 0.5, self.training)
+    def inference(self, x, accent):
+        accent = self.prenet_accent(accent)
+        x = self.prenet_text(x)
+        x = torch.cat([x, accent], dim=-1)
 
-        x = x.transpose(1, 2)
+        x = self.cbh(x)
 
         self.lstm.flatten_parameters()
         outputs, _ = self.lstm(x)
@@ -673,8 +663,10 @@ class Tacotron2(nn.Module):
             output_lengths)
 
     def inference(self, inputs):
-        embedded_inputs = self.embedding(inputs).transpose(1, 2)
-        encoder_outputs = self.encoder.inference(embedded_inputs)
+        text_inputs, accent_inputs = inputs
+        embedded_inputs = self.embedding_text(text_inputs)
+        embedded_accent = self.embedding_accent(accent_inputs)
+        encoder_outputs = self.encoder.inference(embedded_inputs, embedded_accent)
         mel_outputs, gate_outputs, alignments = self.decoder.inference(
             encoder_outputs)
 
