@@ -20,6 +20,7 @@ class TextMelLoader(torch.utils.data.Dataset):
         self.max_wav_value = hparams.max_wav_value
         self.sampling_rate = hparams.sampling_rate
         self.load_mel_from_disk = hparams.load_mel_from_disk
+        self.use_accent = hparams.use_accent
         self.stft = layers.TacotronSTFT(
             hparams.filter_length, hparams.hop_length, hparams.win_length,
             hparams.n_mel_channels, hparams.sampling_rate, hparams.mel_fmin,
@@ -29,9 +30,12 @@ class TextMelLoader(torch.utils.data.Dataset):
 
     def get_mel_text_pair(self, audiopath_and_text):
         # separate filename and text
-        audiopath, text, accent = audiopath_and_text[0], audiopath_and_text[1], audiopath_and_text[2]
-        accent = self.get_accent(accent)
-        assert len(text) == len(accent), f'diff lengths text({len(text)}), accent({len(accent)})\n{text}\n{accent}\n{audiopath}'
+        if use_accent:
+            audiopath, text, accent = audiopath_and_text[0], audiopath_and_text[1], audiopath_and_text[2]
+            accent = self.get_accent(accent)
+        else:
+            audiopath, text = audiopath_and_text[0], audiopath_and_text[1]
+            accent = self.get_text(text)
         text = self.get_text(text)
         mel = self.get_mel(audiopath)
         assert len(text) == len(accent), f'diff lengths text({len(text)}), accent({len(accent)})\n{text}\n{accent}\n{audiopath}'

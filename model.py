@@ -97,7 +97,7 @@ class ForwardAttentionV2(nn.Module):
         self.location_layer = LocationLayer(attention_location_n_filters,
                                             attention_location_kernel_size,
                                             attention_dim)
-        self.score_mask_value = -float('inf')
+        self.score_mask_value = -float(1e4)
 
     def get_alignment_energies(self, query, processed_memory,
                                attention_weights_cat):
@@ -294,12 +294,18 @@ class Encoder(nn.Module):
     def __init__(self, hparams):
         super(Encoder, self).__init__()
 
-        self.prenet_text = Prenet(
-            hparams.symbols_embedding_dim,
-            [hparams.symbols_embedding_dim, int(hparams.symbols_embedding_dim/2)])
-        self.prenet_accent = Prenet(
-            hparams.accent_embedding_dim,
-            [hparams.accent_embedding_dim, int(hparams.accent_embedding_dim/2)])
+        self.use_accent = hparams.use_accent
+        if self.use_accent:
+            self.prenet_text = Prenet(
+                hparams.symbols_embedding_dim,
+                [hparams.symbols_embedding_dim, int(hparams.symbols_embedding_dim/2)])
+            self.prenet_accent = Prenet(
+                hparams.accent_embedding_dim,
+                [hparams.accent_embedding_dim, int(hparams.accent_embedding_dim/2)])
+        else:
+            self.prenet_text = Prenet(
+                hparams.encoder_embedding_dim,
+                [hparams.encoder_embedding_dim, int(hparams.encoder_embedding_dim/2)])
 
         self.cbh = CBH( in_dim=hparams.encoder_cbh_dim,K=16,
             projection=[hparams.encoder_cbh_dim]*2)
@@ -308,10 +314,11 @@ class Encoder(nn.Module):
                             int(hparams.encoder_embedding_dim /2), 1,
                             batch_first=True, bidirectional=True)
 
-    def forward(self, x, input_lengths, accent):
-        accent = self.prenet_accent(accent)
+    def forward(self, x, input_lengths, accent=None):
         x = self.prenet_text(x)
-        x = torch.cat([x, accent], dim=-1)
+        if self.use_accent:
+            accent = self.prenet_accent(accent)
+            x = torch.cat([x, accent], dim=-1)
 
         x = self.cbh(x)
 
@@ -328,10 +335,11 @@ class Encoder(nn.Module):
 
         return outputs
 
-    def inference(self, x, accent):
-        accent = self.prenet_accent(accent)
+    def inference(self, x, accent=None):
         x = self.prenet_text(x)
-        x = torch.cat([x, accent], dim=-1)
+        if self.use_accent:
+            accent = self.prenet_accent(accent)
+            x = torch.cat([x, accent], dim=-1)
 
         x = self.cbh(x)
 
@@ -421,7 +429,7 @@ class Decoder(nn.Module):
             B, MAX_TIME).zero_())
         self.attention_weights_cum = Variable(memory.data.new(
             B, MAX_TIME).zero_())
-        self.log_alpha = memory.new_zeros(B, MAX_TIME).fill_(-float('inf'))
+        self.log_alpha = memory.new_zeros(B, MAX_TIME).fill_(-float(1e4))
         self.log_alpha[:, 0].fill_(0.)
         self.attention_context = Variable(memory.data.new(
             B, self.encoder_embedding_dim).zero_())
@@ -603,12 +611,18 @@ class Tacotron2(nn.Module):
         self.fp16_run = hparams.fp16_run
         self.n_mel_channels = hparams.n_mel_channels
         self.n_frames_per_step = hparams.n_frames_per_step
+        self.use_accent = hparams.use_accent
         self.embedding = nn.Embedding(
             hparams.n_symbols, hparams.symbols_embedding_dim)
-        self.embedding_text = nn.Embedding(
-            hparams.n_symbols, hparams.symbols_embedding_dim)
-        self.embedding_accent = nn.Embedding(
-            hparams.n_symbols, hparams.accent_embedding_dim)
+        if self.use_accent:
+            self.embedding_text = nn.Embedding(
+                    hparams.n_symbols, hparams.symbols_embedding_dim)
+            self.embedding_accent = nn.Embedding(
+                hparams.n_symbols, hparams.accent_embedding_dim)
+        else:
+            self.embedding_text = nn.Embedding(
+                    hparams.n_symbols, hparams.encoder_embedding_dim)
+
         std = sqrt(2.0 / (hparams.n_symbols + hparams.symbols_embedding_dim))
         val = sqrt(3.0) * std  # uniform bounds for std
         self.embedding.weight.data.uniform_(-val, val)
@@ -649,8 +663,11 @@ class Tacotron2(nn.Module):
         text_lengths, output_lengths= text_lengths.data, output_lengths.data
 
         embedded_inputs = self.embedding_text(text_inputs)
-        embedded_accent = self.embedding_accent(accent_inputs)
-        encoder_outputs = self.encoder(embedded_inputs, text_lengths, embedded_accent)
+        if self.use_accent:
+            embedded_accent = self.embedding_accent(accent_inputs)
+            encoder_outputs = self.encoder(embedded_inputs, text_lengths, embedded_accent)
+        else:
+            encoder_outputs = self.encoder(embedded_inputs, text_lengths)
 
         mel_outputs, gate_outputs, alignments = self.decoder(
             encoder_outputs, mels, memory_lengths=text_lengths)
@@ -665,8 +682,11 @@ class Tacotron2(nn.Module):
     def inference(self, inputs):
         text_inputs, accent_inputs = inputs
         embedded_inputs = self.embedding_text(text_inputs)
-        embedded_accent = self.embedding_accent(accent_inputs)
-        encoder_outputs = self.encoder.inference(embedded_inputs, embedded_accent)
+        if self.use_accent:
+            embedded_accent = self.embedding_accent(accent_inputs)
+            encoder_outputs = self.encoder.inference(embedded_inputs, embedded_accent)
+        else:
+            encoder_outputs = self.encoder.inference(embedded_inputs)
         mel_outputs, gate_outputs, alignments = self.decoder.inference(
             encoder_outputs)
 

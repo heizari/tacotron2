@@ -47,7 +47,7 @@ def create_hparams(hparams_string=None, verbose=False):
         n_symbols=len(symbols),
         accent_embedding_dim=64,
         symbols_embedding_dim=448,
-        train_symbols_embedding_dim=512-64,
+        use_accent=False,
 
         # Encoder parameters
         encoder_kernel_size=5,
