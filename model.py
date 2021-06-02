@@ -252,7 +252,6 @@ class ZoneoutLSTM(nn.Module):
         B = x.size(0)
         length = x.size(1)
         dim = x.size(2)
-        self.outputs = torch.zeros([B, length, dim], dtype=x.dtype, device=x.deivce)
         self.lstm_hidden = torch.zeros(B, dim, dtype=x.dtype, device=x.device)
         self.lstm_cell = torch.zeros(B, dim, dtype=x.dtype, device=x.device)
 
@@ -268,6 +267,8 @@ class ZoneoutLSTM(nn.Module):
         return self.lstm_hidden
 
     def forward(self, x, backward=False):
+        outputs = torch.zeros(
+            [x.size(0), x.size(1), x.size(2)], dtype=x.dtype, device=x.device)
         init_encoder_lstm(x)
         first_idx = x.size(1)-1 if backward else 0
 
