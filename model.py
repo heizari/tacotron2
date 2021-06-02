@@ -275,7 +275,6 @@ class ZoneoutLSTM(nn.Module):
             lstm_input = x[:, abs(i - first_idx), :]
             output = self.encode(lstm_input)
             outputs[:, abs(i - first_idx), :] = output
-            self.outputs[:, i, :] = output
 
         return outputs
 
