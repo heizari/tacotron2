@@ -5,6 +5,7 @@ from torch import nn
 from torch.nn import functional as F
 from layers import ConvBatchNorm, ConvNorm, LinearNorm
 from utils import to_gpu, get_mask_from_lengths
+import pdb
 
 
 class LocationLayer(nn.Module):
@@ -239,6 +240,25 @@ class CBH(nn.Module):
 
         return x
 
+class ZoneoutLSTM(nn.Module):
+    def __init__(self, hparams, zoneout_prob, dropout_rate=0.1):
+        super(ZoneoutLSTM, self).__init__()
+        self.lstm = nn.LSTMCell(hparams.encoder_cbh_dim,
+                            hparams.encoder_hidden_dim)
+        self.zoneout_prob = zoneout_prob
+        self.dropout_rate = dropout_rate
+
+    def forward(self, lstm_input, lstm_hidden_prev, lstm_cell_prev):
+        # import pdb
+        # pdb.set_trace()
+        lstm_hidden, lstm_cell = self.lstm(lstm_input, (lstm_hidden_prev, lstm_cell_prev))
+        zoneout_prob_c, zoneout_prob_h = self.zoneout_prob
+
+        lstm_hidden = F.dropout(lstm_hidden, p=self.dropout_rate, training=self.training) 
+        lstm_cell =  F.dropout(lstm_cell, p=self.dropout_rate, training=self.training)
+        lstm_output = lstm_hidden
+
+        return lstm_output, lstm_hidden, lstm_cell
 
 class Postnet(nn.Module):
     """Postnet
@@ -295,6 +315,7 @@ class Encoder(nn.Module):
         super(Encoder, self).__init__()
 
         self.use_accent = hparams.use_accent
+        self.encoder_hidden_dim = hparams.encoder_hidden_dim
         if self.use_accent:
             self.prenet_text = Prenet(
                 hparams.symbols_embedding_dim,
@@ -305,14 +326,13 @@ class Encoder(nn.Module):
         else:
             self.prenet_text = Prenet(
                 hparams.encoder_embedding_dim,
-                [hparams.encoder_embedding_dim, int(hparams.encoder_embedding_dim/2)])
+                [hparams.encoder_embedding_dim, hparams.encoder_cbh_dim])
 
         self.cbh = CBH( in_dim=hparams.encoder_cbh_dim,K=16,
             projection=[hparams.encoder_cbh_dim]*2)
 
-        self.lstm = nn.LSTM(hparams.encoder_cbh_dim,
-                            int(hparams.encoder_embedding_dim /2), 1,
-                            batch_first=True, bidirectional=True)
+        zoneout_prob = (hparams.p_encoder_dropout, hparams.p_encoder_dropout)
+        self.zoneout_lstm = ZoneoutLSTM(hparams, zoneout_prob)
 
     def forward(self, x, input_lengths, accent=None):
         x = self.prenet_text(x)
@@ -321,21 +341,39 @@ class Encoder(nn.Module):
             x = torch.cat([x, accent], dim=-1)
 
         x = self.cbh(x)
-
-        # pytorch tensor are not reversible, hence the conversion
+        # pdb.set_trace()
         input_lengths = input_lengths.cpu().numpy()
-        x = nn.utils.rnn.pack_padded_sequence(
-            x, input_lengths, batch_first=True)
+        # x = nn.utils.rnn.pack_padded_sequence(
+            # x, input_lengths, batch_first=True)
+        # pytorch tensor are not reversible, hence the conversion
+        outputs = torch.zeros([x.size(0), x.size(1), x.size(2)*2], dtype=x.dtype, device=x.device)
+        forward_hidden = torch.zeros(x.size(0), x.size(2), dtype=x.dtype, device=x.device)
+        forward_cell= torch.zeros(x.size(0), x.size(2), dtype=x.dtype, device=x.device)
+        backward_hidden = torch.zeros(x.size(0), x.size(2), dtype=x.dtype, device=x.device)
+        backward_cell = torch.zeros(x.size(0), x.size(2), dtype=x.dtype, device=x.device)
+        # x = nn.utils.rnn.pack_padded_sequence(
+            # x, input_lengths, batch_first=True)
 
-        self.lstm.flatten_parameters()
-        outputs, _ = self.lstm(x)
+        # self.lstm.flatten_parameters()
 
-        outputs, _ = nn.utils.rnn.pad_packed_sequence(
-            outputs, batch_first=True)
+        for i in range(x.size(1)):
+            forward_input = x[:, i, :]
+            backward_input = x[:, x.size(1)-(i+1), :]
+            forward_output, forward_hidden, forward_cell = self.zoneout_lstm(
+                    forward_input, forward_hidden, forward_cell)
+            backward_output, backward_hidden, backward_cell = self.zoneout_lstm(
+                    backward_input, backward_hidden, backward_cell)
+            outputs[:, i, :x.size(2)] = forward_output
+            outputs[:, x.size(1)-(i+1), x.size(2):] = backward_output
+        # outputs, _ = nn.utils.rnn.pad_packed_sequence(
+            # outputs, batch_first=True)
+        # outputs, _ = nn.utils.rnn.pad_packed_sequence(
+            # outputs, batch_first=True)
 
         return outputs
 
     def inference(self, x, accent=None):
+        input_length = x.size(1)
         x = self.prenet_text(x)
         if self.use_accent:
             accent = self.prenet_accent(accent)

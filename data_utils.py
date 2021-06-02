@@ -30,7 +30,7 @@ class TextMelLoader(torch.utils.data.Dataset):
 
     def get_mel_text_pair(self, audiopath_and_text):
         # separate filename and text
-        if use_accent:
+        if self.use_accent:
             audiopath, text, accent = audiopath_and_text[0], audiopath_and_text[1], audiopath_and_text[2]
             accent = self.get_accent(accent)
         else:

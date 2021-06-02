@@ -47,13 +47,14 @@ def create_hparams(hparams_string=None, verbose=False):
         n_symbols=len(symbols),
         accent_embedding_dim=64,
         symbols_embedding_dim=448,
-        use_accent=False,
+        use_accent=True,
 
         # Encoder parameters
         encoder_kernel_size=5,
         encoder_n_convolutions=3,
         encoder_cbh_dim=256,
         encoder_embedding_dim=512,
+        encoder_hidden_dim=256,
 
         # Decoder parameters
         n_frames_per_step=1,  # currently only 1 is supported
@@ -61,6 +62,7 @@ def create_hparams(hparams_string=None, verbose=False):
         prenet_dim=256,
         max_decoder_steps=1000,
         gate_threshold=0.5,
+        p_encoder_dropout=0.1,
         p_attention_dropout=0.1,
         p_decoder_dropout=0.1,
 
