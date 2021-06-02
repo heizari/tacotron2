@@ -248,17 +248,36 @@ class ZoneoutLSTM(nn.Module):
         self.zoneout_prob = zoneout_prob
         self.dropout_rate = dropout_rate
 
-    def forward(self, lstm_input, lstm_hidden_prev, lstm_cell_prev):
-        # import pdb
-        # pdb.set_trace()
-        lstm_hidden, lstm_cell = self.lstm(lstm_input, (lstm_hidden_prev, lstm_cell_prev))
-        zoneout_prob_c, zoneout_prob_h = self.zoneout_prob
+    def init_encoder_lstm(self, x):
+        B = x.size(0)
+        length = x.size(1)
+        dim = x.size(2)
+        self.outputs = torch.zeros([B, length, dim], dtype=x.dtype, device=x.deivce)
+        self.lstm_hidden = torch.zeros(B, dim, dtype=x.dtype, device=x.device)
+        self.lstm_cell = torch.zeros(B, dim, dtype=x.dtype, device=x.device)
 
-        lstm_hidden = F.dropout(lstm_hidden, p=self.dropout_rate, training=self.training) 
-        lstm_cell =  F.dropout(lstm_cell, p=self.dropout_rate, training=self.training)
-        lstm_output = lstm_hidden
+    def encode(self, lstm_input):
+        self.lstm_hidden, self.lstm_cell = self.lstm(
+            lstm_input, (self.lstm_hidden, self.lstm_cell))
 
-        return lstm_output, lstm_hidden, lstm_cell
+        self.lstm_hidden = F.dropout(
+            self.lstm_hidden, p=self.dropout_rate, training=self.training) 
+        self.lstm_cell =  F.dropout(
+            self.lstm_cell, p=self.dropout_rate, training=self.training)
+
+        return self.lstm_hidden
+
+    def forward(self, x, backward=False):
+        init_encoder_lstm(x)
+        first_idx = x.size(1)-1 if backward else 0
+
+        for i in range(x.size(1)):
+            lstm_input = x[:, abs(i - first_idx), :]
+            output = self.encode(lstm_input)
+            outputs[:, abs(i - first_idx), :] = output
+            self.outputs[:, i, :] = output
+
+        return outputs
 
 class Postnet(nn.Module):
     """Postnet
@@ -341,34 +360,10 @@ class Encoder(nn.Module):
             x = torch.cat([x, accent], dim=-1)
 
         x = self.cbh(x)
-        # pdb.set_trace()
-        input_lengths = input_lengths.cpu().numpy()
-        # x = nn.utils.rnn.pack_padded_sequence(
-            # x, input_lengths, batch_first=True)
-        # pytorch tensor are not reversible, hence the conversion
-        outputs = torch.zeros([x.size(0), x.size(1), x.size(2)*2], dtype=x.dtype, device=x.device)
-        forward_hidden = torch.zeros(x.size(0), x.size(2), dtype=x.dtype, device=x.device)
-        forward_cell= torch.zeros(x.size(0), x.size(2), dtype=x.dtype, device=x.device)
-        backward_hidden = torch.zeros(x.size(0), x.size(2), dtype=x.dtype, device=x.device)
-        backward_cell = torch.zeros(x.size(0), x.size(2), dtype=x.dtype, device=x.device)
-        # x = nn.utils.rnn.pack_padded_sequence(
-            # x, input_lengths, batch_first=True)
 
-        # self.lstm.flatten_parameters()
-
-        for i in range(x.size(1)):
-            forward_input = x[:, i, :]
-            backward_input = x[:, x.size(1)-(i+1), :]
-            forward_output, forward_hidden, forward_cell = self.zoneout_lstm(
-                    forward_input, forward_hidden, forward_cell)
-            backward_output, backward_hidden, backward_cell = self.zoneout_lstm(
-                    backward_input, backward_hidden, backward_cell)
-            outputs[:, i, :x.size(2)] = forward_output
-            outputs[:, x.size(1)-(i+1), x.size(2):] = backward_output
-        # outputs, _ = nn.utils.rnn.pad_packed_sequence(
-            # outputs, batch_first=True)
-        # outputs, _ = nn.utils.rnn.pad_packed_sequence(
-            # outputs, batch_first=True)
+        forward_outputs = self.zoneout_lstm(x)
+        backward_outputs = self.zoneout_lstm(x, backward=True)
+        outputs = torch.cat([forward_outputs, backward_outputs], dim=-1)
 
         return outputs
 
@@ -381,8 +376,11 @@ class Encoder(nn.Module):
 
         x = self.cbh(x)
 
-        self.lstm.flatten_parameters()
-        outputs, _ = self.lstm(x)
+        forward_outputs = self.zoneout_lstm(x)
+        backward_outputs = self.zoneout_lstm(x, backward=True)
+        outputs = torch.cat([forward_outputs, backward_outputs], dim=-1)
+        # self.lstm.flatten_parameters()
+        # outputs, _ = self.lstm(x)
 
         return outputs
 
