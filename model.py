@@ -269,7 +269,7 @@ class ZoneoutLSTM(nn.Module):
     def forward(self, x, backward=False):
         outputs = torch.zeros(
             [x.size(0), x.size(1), x.size(2)], dtype=x.dtype, device=x.device)
-        init_encoder_lstm(x)
+        self.init_encoder_lstm(x)
         first_idx = x.size(1)-1 if backward else 0
 
         for i in range(x.size(1)):
