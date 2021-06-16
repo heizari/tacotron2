@@ -62,7 +62,8 @@ def create_hparams(hparams_string=None, verbose=False):
         prenet_dim=256,
         max_decoder_steps=1000,
         gate_threshold=0.5,
-        p_encoder_dropout=0.1,
+        zoneout_hidden=0.1,
+        zoneout_cell=0.1,
         p_attention_dropout=0.1,
         p_decoder_dropout=0.1,
 

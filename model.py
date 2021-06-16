@@ -241,12 +241,14 @@ class CBH(nn.Module):
         return x
 
 class ZoneoutLSTM(nn.Module):
-    def __init__(self, hparams, zoneout_prob, dropout_rate=0.1):
+    def __init__(self, hparams):
         super(ZoneoutLSTM, self).__init__()
-        self.lstm = nn.LSTMCell(hparams.encoder_cbh_dim,
-                            hparams.encoder_hidden_dim)
-        self.zoneout_prob = zoneout_prob
-        self.dropout_rate = dropout_rate
+        self.lstm = nn.LSTMCell(
+            hparams.encoder_cbh_dim,
+            hparams.encoder_hidden_dim)
+        self.zoneout_prob = (
+            hparams.zoneout_hidden,
+            hparams.zoneout_cell)
 
     def init_encoder_lstm(self, x):
         B = x.size(0)
@@ -256,13 +258,16 @@ class ZoneoutLSTM(nn.Module):
         self.lstm_cell = torch.zeros(B, dim, dtype=x.dtype, device=x.device)
 
     def encode(self, lstm_input):
-        self.lstm_hidden, self.lstm_cell = self.lstm(
+        zoneout_hidden, zoneout_cell = self.zoneout_prob
+        keep_rate_hidden = 1.0 - zoneout_hidden
+        keep_rate_cell = 1.0 - zoneout_cell
+        lstm_hidden_new, lstm_cell_new = self.lstm(
             lstm_input, (self.lstm_hidden, self.lstm_cell))
 
-        self.lstm_hidden = F.dropout(
-            self.lstm_hidden, p=self.dropout_rate, training=self.training) 
-        self.lstm_cell =  F.dropout(
-            self.lstm_cell, p=self.dropout_rate, training=self.training)
+        self.lstm_hidden = keep_rate_hidden * F.dropout(
+            lstm_hidden_new - self.lstm_hidden, p=zoneout_hidden, training=self.training) + self.lstm_hidden
+        self.lstm_cell =  keep_rate_cell * F.dropout(
+            lstm_cell_new - self.lstm_cell, p=zoneout_cell, training=self.training) + self.lstm_cell
 
         return self.lstm_hidden
 
@@ -350,8 +355,7 @@ class Encoder(nn.Module):
         self.cbh = CBH( in_dim=hparams.encoder_cbh_dim,K=16,
             projection=[hparams.encoder_cbh_dim]*2)
 
-        zoneout_prob = (hparams.p_encoder_dropout, hparams.p_encoder_dropout)
-        self.zoneout_lstm = ZoneoutLSTM(hparams, zoneout_prob)
+        self.zoneout_lstm = ZoneoutLSTM(hparams)
 
     def forward(self, x, input_lengths, accent=None):
         x = self.prenet_text(x)
