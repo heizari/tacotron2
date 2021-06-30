@@ -407,7 +407,7 @@ class Decoder(nn.Module):
             hparams.prenet_dim + hparams.encoder_embedding_dim,
             hparams.attention_rnn_dim)
 
-        self.attention_layer = ForwardAttentionV2(
+        self.attention_layer = Attention(
             hparams.attention_rnn_dim, hparams.encoder_embedding_dim,
             hparams.attention_dim, hparams.attention_location_n_filters,
             hparams.attention_location_kernel_size)
@@ -465,8 +465,8 @@ class Decoder(nn.Module):
             B, MAX_TIME).zero_())
         self.attention_weights_cum = Variable(memory.data.new(
             B, MAX_TIME).zero_())
-        self.log_alpha = memory.new_zeros(B, MAX_TIME).fill_(-float(1e4))
-        self.log_alpha[:, 0].fill_(0.)
+        # self.log_alpha = memory.new_zeros(B, MAX_TIME).fill_(-float(1e4))
+        # self.log_alpha[:, 0].fill_(0.)
         self.attention_context = Variable(memory.data.new(
             B, self.encoder_embedding_dim).zero_())
 
@@ -544,9 +544,13 @@ class Decoder(nn.Module):
         attention_weights_cat = torch.cat(
             (self.attention_weights.unsqueeze(1),
              self.attention_weights_cum.unsqueeze(1)), dim=1)
-        self.attention_context, self.attention_weights, self.log_alpha = self.attention_layer(
+        self.attention_context, self.attention_weights = self.attention_layer(
             self.attention_hidden, self.memory, self.processed_memory,
-            attention_weights_cat, self.mask, self.log_alpha)
+            attention_weights_cat, self.mask)
+
+        # self.attention_context, self.attention_weights, self.log_alpha = self.attention_layer(
+            # self.attention_hidden, self.memory, self.processed_memory,
+            # attention_weights_cat, self.mask, self.log_alpha)
 
         self.attention_weights_cum += self.attention_weights
         decoder_input = torch.cat(
@@ -653,6 +657,9 @@ class Tacotron2(nn.Module):
                     hparams.n_symbols, hparams.symbols_embedding_dim)
             self.embedding_accent = nn.Embedding(
                 hparams.n_symbols, hparams.accent_embedding_dim)
+            std_accent = sqrt(2.0 / (hparams.n_symbols + hparams.accent_embedding_dim))
+            val_accent= sqrt(3.0) * std_accent  # uniform bounds for std
+            self.embedding_accent.weight.data.uniform_(-val_accent, val_accent)
         else:
             self.embedding_text = nn.Embedding(
                     hparams.n_symbols, hparams.encoder_embedding_dim)
