@@ -240,44 +240,35 @@ class CBH(nn.Module):
 
         return x
 
-class ZoneoutLSTM(nn.Module):
-    def __init__(self, hparams, zoneout_prob, dropout_rate=0.1):
-        super(ZoneoutLSTM, self).__init__()
-        self.lstm = nn.LSTMCell(hparams.encoder_cbh_dim,
-                            hparams.encoder_hidden_dim)
-        self.zoneout_prob = zoneout_prob
+class ZoneoutRNN(nn.Module):
+    def __init__(self, in_dim, out_dim, zoneout_rate, dropout_rate=0.1):
+        super(ZoneoutRNN, self).__init__()
+        self.zoneout_rate = zoneout_rate
+        self.lstm = nn.LSTMCell(in_dim, out_dim)
         self.dropout_rate = dropout_rate
 
-    def init_encoder_lstm(self, x):
-        B = x.size(0)
-        length = x.size(1)
-        dim = x.size(2)
-        self.lstm_hidden = torch.zeros(B, dim, dtype=x.dtype, device=x.device)
-        self.lstm_cell = torch.zeros(B, dim, dtype=x.dtype, device=x.device)
+    def init_zoneout_lstm(self, init_hidden, init_cell):
+        self.lstm_hidden = init_hidden
+        self.lstm_cell = init_cell
 
-    def encode(self, lstm_input):
-        self.lstm_hidden, self.lstm_cell = self.lstm(
-            lstm_input, (self.lstm_hidden, self.lstm_cell))
+    def forward(self, x):
+        # self.init_zoneout_lstm(x)
 
-        self.lstm_hidden = F.dropout(
-            self.lstm_hidden, p=self.dropout_rate, training=self.training) 
-        self.lstm_cell =  F.dropout(
-            self.lstm_cell, p=self.dropout_rate, training=self.training)
+        lstm_hidden, lstm_cell = self.lstm(
+            x, (self.lstm_hidden, self.lstm_cell))
+
+        keep_rate = 1 - self.zoneout_rate
+
+        if self.training:
+            self.lstm_hidden = keep_rate * F.dropout(
+                lstm_hidden - self.lstm_hidden, p=self.dropout_rate) + self.lstm_hidden
+            self.lstm_cell =  keep_rate * F.dropout(
+                lstm_cell - self.lstm_cell, p=self.dropout_rate) + self.lstm_cell
+        else:
+            self.lstm_hidden = keep_rate * lstm_hidden + self.zoneout_rate * self.lstm_hidden
+            self.lstm_cell = keep_rate * lstm_cell + self.zoneout_rate * self.lstm_cell
 
         return self.lstm_hidden
-
-    def forward(self, x, backward=False):
-        outputs = torch.zeros(
-            [x.size(0), x.size(1), x.size(2)], dtype=x.dtype, device=x.device)
-        self.init_encoder_lstm(x)
-        first_idx = x.size(1)-1 if backward else 0
-
-        for i in range(x.size(1)):
-            lstm_input = x[:, abs(i - first_idx), :]
-            output = self.encode(lstm_input)
-            outputs[:, abs(i - first_idx), :] = output
-
-        return outputs
 
 class Postnet(nn.Module):
     """Postnet
@@ -350,8 +341,12 @@ class Encoder(nn.Module):
         self.cbh = CBH( in_dim=hparams.encoder_cbh_dim,K=16,
             projection=[hparams.encoder_cbh_dim]*2)
 
-        zoneout_prob = (hparams.p_encoder_dropout, hparams.p_encoder_dropout)
-        self.zoneout_lstm = ZoneoutLSTM(hparams, zoneout_prob)
+        self.zoneout_lstm = ZoneoutRNN(
+            in_dim = hparams.encoder_cbh_dim,
+            out_dim = hparams.encoder_hidden_dim,
+            zoneout_rate = hparams.p_zoneout,
+            dropout_rate = hparams.p_encoder_dropout
+        )
 
     def forward(self, x, input_lengths, accent=None):
         x = self.prenet_text(x)
@@ -361,8 +356,21 @@ class Encoder(nn.Module):
 
         x = self.cbh(x)
 
-        forward_outputs = self.zoneout_lstm(x)
-        backward_outputs = self.zoneout_lstm(x, backward=True)
+        B = x.size(0)
+        dim = x.size(2)
+        init_hidden = torch.zeros(B, dim, dtype=x.dtype, device=x.device)
+        init_cell = torch.zeros(B, dim, dtype=x.dtype, device=x.device)
+        self.zoneout_lstm.init_zoneout_lstm(init_hidden, init_cell)
+        forward_outputs = torch.zeros(
+            [B, x.size(1), dim], dtype=x.dtype, device=x.device)
+        backward_outputs = torch.zeros(
+            [B, x.size(1), dim], dtype=x.dtype, device=x.device)
+
+        for i in range(x.size(1)):
+            forward_output = self.zoneout_lstm(x[:, i, :])
+            backward_output = self.zoneout_lstm(x[:, x.size(1) - (i+1), :])
+            forward_outputs[:, i, :] = forward_output
+            backward_outputs[:, x.size(1) - (i+1), :] = backward_output
         outputs = torch.cat([forward_outputs, backward_outputs], dim=-1)
 
         return outputs
@@ -376,8 +384,21 @@ class Encoder(nn.Module):
 
         x = self.cbh(x)
 
-        forward_outputs = self.zoneout_lstm(x)
-        backward_outputs = self.zoneout_lstm(x, backward=True)
+        B = x.size(0)
+        dim = x.size(2)
+        init_hidden = torch.zeros(B, dim, dtype=x.dtype, device=x.device)
+        init_cell = torch.zeros(B, dim, dtype=x.dtype, device=x.device)
+        self.zoneout_lstm.init_zoneout_lstm(init_hidden, init_cell)
+        forward_outputs = torch.zeros(
+            [x.size(0), x.size(1), x.size(2)], dtype=x.dtype, device=x.device)
+        backward_outputs = torch.zeros(
+            [x.size(0), x.size(1), x.size(2)], dtype=x.dtype, device=x.device)
+
+        for i in range(x.size(1)):
+            forward_output = self.zoneout_lstm(x[:, i, :])
+            backward_output = self.zoneout_lstm(x[:, x.size(1) - (i+1), :])
+            forward_outputs[:, i, :] = forward_output
+            backward_outputs[:, x.size(1) - (i+1), :] = backward_output
         outputs = torch.cat([forward_outputs, backward_outputs], dim=-1)
         # self.lstm.flatten_parameters()
         # outputs, _ = self.lstm(x)
@@ -403,11 +424,13 @@ class Decoder(nn.Module):
             hparams.n_mel_channels * hparams.n_frames_per_step,
             [hparams.prenet_dim, hparams.prenet_dim])
 
-        self.attention_rnn = nn.LSTMCell(
+        self.attention_rnn = ZoneoutRNN(
             hparams.prenet_dim + hparams.encoder_embedding_dim,
-            hparams.attention_rnn_dim)
+            hparams.attention_rnn_dim,
+            hparams.p_zoneout,
+            hparams.p_decoder_dropout)
 
-        self.attention_layer = Attention(
+        self.attention_layer = ForwardAttentionV2(
             hparams.attention_rnn_dim, hparams.encoder_embedding_dim,
             hparams.attention_dim, hparams.attention_location_n_filters,
             hparams.attention_location_kernel_size)
@@ -465,14 +488,16 @@ class Decoder(nn.Module):
             B, MAX_TIME).zero_())
         self.attention_weights_cum = Variable(memory.data.new(
             B, MAX_TIME).zero_())
-        # self.log_alpha = memory.new_zeros(B, MAX_TIME).fill_(-float(1e4))
-        # self.log_alpha[:, 0].fill_(0.)
+        self.log_alpha = memory.new_zeros(B, MAX_TIME).fill_(-float(1e4))
+        self.log_alpha[:, 0].fill_(0.)
         self.attention_context = Variable(memory.data.new(
             B, self.encoder_embedding_dim).zero_())
 
         self.memory = memory
         self.processed_memory = self.attention_layer.memory_layer(memory)
         self.mask = mask
+
+        self.attention_rnn.init_zoneout_lstm(self.attention_hidden, self.attention_cell)
 
     def parse_decoder_inputs(self, decoder_inputs):
         """ Prepares decoder inputs, i.e. mel outputs
@@ -536,21 +561,18 @@ class Decoder(nn.Module):
         attention_weights:
         """
         cell_input = torch.cat((decoder_input, self.attention_context), -1)
-        self.attention_hidden, self.attention_cell = self.attention_rnn(
-            cell_input, (self.attention_hidden, self.attention_cell))
-        self.attention_hidden = F.dropout(
-            self.attention_hidden, self.p_attention_dropout, self.training)
+        self.attention_hidden = self.attention_rnn(cell_input)
 
         attention_weights_cat = torch.cat(
             (self.attention_weights.unsqueeze(1),
              self.attention_weights_cum.unsqueeze(1)), dim=1)
-        self.attention_context, self.attention_weights = self.attention_layer(
-            self.attention_hidden, self.memory, self.processed_memory,
-            attention_weights_cat, self.mask)
 
-        # self.attention_context, self.attention_weights, self.log_alpha = self.attention_layer(
+        # self.attention_context, self.attention_weights = self.attention_layer(
             # self.attention_hidden, self.memory, self.processed_memory,
-            # attention_weights_cat, self.mask, self.log_alpha)
+            # attention_weights_cat, self.mask)
+        self.attention_context, self.attention_weights, self.log_alpha = self.attention_layer(
+            self.attention_hidden, self.memory, self.processed_memory,
+            attention_weights_cat, self.mask, self.log_alpha)
 
         self.attention_weights_cum += self.attention_weights
         decoder_input = torch.cat(
@@ -657,9 +679,9 @@ class Tacotron2(nn.Module):
                     hparams.n_symbols, hparams.symbols_embedding_dim)
             self.embedding_accent = nn.Embedding(
                 hparams.n_symbols, hparams.accent_embedding_dim)
-            std_accent = sqrt(2.0 / (hparams.n_symbols + hparams.accent_embedding_dim))
-            val_accent= sqrt(3.0) * std_accent  # uniform bounds for std
-            self.embedding_accent.weight.data.uniform_(-val_accent, val_accent)
+            # std_accent = sqrt(2.0 / (hparams.n_symbols + hparams.accent_embedding_dim))
+            # val_accent= sqrt(3.0) * std_accent  # uniform bounds for std
+            # self.embedding_accent.weight.data.uniform_(-val_accent, val_accent)
         else:
             self.embedding_text = nn.Embedding(
                     hparams.n_symbols, hparams.encoder_embedding_dim)
