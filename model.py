@@ -162,7 +162,7 @@ class Prenet(nn.Module):
         for linear in self.layers:
             x = F.dropout(F.relu(linear(x)), p=0.5, training=True)
         return x
-
+# cf: https://arxiv.org/pdf/1505.00387.pdf
 class Highway(nn.Module):
     def __init__(self, in_size, out_size):
 
@@ -187,7 +187,7 @@ class Highway(nn.Module):
         x = gate * nonlinear + (1 - gate) * x
 
         return x
-
+# tacotron1 を参考
 class CBH(nn.Module):
     def __init__(self, in_dim, K=16, projection=[128, 128]):
         super(CBH, self).__init__()
@@ -315,7 +315,7 @@ class Postnet(nn.Module):
 
         return x
 
-
+# cf:https://arxiv.org/pdf/2005.10390.pdf page 7, fig. A
 class Encoder(nn.Module):
     """Encoder module:
         - Three 1-d convolution banks
