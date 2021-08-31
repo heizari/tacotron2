@@ -17,6 +17,7 @@ class LinearNorm(torch.nn.Module):
     def forward(self, x):
         return self.linear_layer(x)
 
+# modelの詳細は論文を参考
 class ConvBatchNorm(torch.nn.Module):
     def __init__(self, in_dim, out_dim, kernel_size, stride, padding, activation=None):
         super(ConvBatchNorm, self).__init__()

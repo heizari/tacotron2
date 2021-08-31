@@ -53,6 +53,7 @@ def create_hparams(hparams_string=None, verbose=False):
         encoder_kernel_size=5,
         encoder_n_convolutions=3,
         encoder_cbh_dim=256,
+        # encoder_embedding_dim = accent_embedding_dim + symbols_embedding_dim
         encoder_embedding_dim=512,
         encoder_hidden_dim=256,
 

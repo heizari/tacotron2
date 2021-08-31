@@ -327,6 +327,7 @@ class Encoder(nn.Module):
         self.use_accent = hparams.use_accent
         self.encoder_hidden_dim = hparams.encoder_hidden_dim
         if self.use_accent:
+            # embeddingのtext,accentそれぞれの出力をprenetへ
             self.prenet_text = Prenet(
                 hparams.symbols_embedding_dim,
                 [hparams.symbols_embedding_dim, int(hparams.symbols_embedding_dim/2)])
@@ -338,9 +339,11 @@ class Encoder(nn.Module):
                 hparams.encoder_embedding_dim,
                 [hparams.encoder_embedding_dim, hparams.encoder_cbh_dim])
 
+        #prenetの出力をCBHへ
         self.cbh = CBH( in_dim=hparams.encoder_cbh_dim,K=16,
             projection=[hparams.encoder_cbh_dim]*2)
 
+        #CBHの出力をlstmへ
         self.zoneout_lstm = ZoneoutRNN(
             in_dim = hparams.encoder_cbh_dim,
             out_dim = hparams.encoder_hidden_dim,
@@ -358,6 +361,8 @@ class Encoder(nn.Module):
 
         B = x.size(0)
         dim = x.size(2)
+
+        #init for bi-directional zoneout lstm
         init_hidden = torch.zeros(B, dim, dtype=x.dtype, device=x.device)
         init_cell = torch.zeros(B, dim, dtype=x.dtype, device=x.device)
         self.zoneout_lstm.init_zoneout_lstm(init_hidden, init_cell)
@@ -366,6 +371,7 @@ class Encoder(nn.Module):
         backward_outputs = torch.zeros(
             [B, x.size(1), dim], dtype=x.dtype, device=x.device)
 
+        #bi-directional zoneout lstmの処理のため、lstm cellへの入力をbi-directionalに取得して処理
         for i in range(x.size(1)):
             forward_output = self.zoneout_lstm(x[:, i, :])
             backward_output = self.zoneout_lstm(x[:, x.size(1) - (i+1), :])
@@ -488,6 +494,7 @@ class Decoder(nn.Module):
             B, MAX_TIME).zero_())
         self.attention_weights_cum = Variable(memory.data.new(
             B, MAX_TIME).zero_())
+        #forward attentionのために追加
         self.log_alpha = memory.new_zeros(B, MAX_TIME).fill_(-float(1e4))
         self.log_alpha[:, 0].fill_(0.)
         self.attention_context = Variable(memory.data.new(
@@ -675,6 +682,7 @@ class Tacotron2(nn.Module):
         self.n_frames_per_step = hparams.n_frames_per_step
         self.use_accent = hparams.use_accent
         if self.use_accent:
+            #text, accentを埋め込み表現に変換
             self.embedding_text = nn.Embedding(
                     hparams.n_symbols, hparams.symbols_embedding_dim)
             self.embedding_accent = nn.Embedding(

@@ -20,7 +20,7 @@ class TextMelLoader(torch.utils.data.Dataset):
         self.max_wav_value = hparams.max_wav_value
         self.sampling_rate = hparams.sampling_rate
         self.load_mel_from_disk = hparams.load_mel_from_disk
-        self.use_accent = hparams.use_accent
+        self.use_accent = hparams.use_accent #アクセントありかなしか
         self.stft = layers.TacotronSTFT(
             hparams.filter_length, hparams.hop_length, hparams.win_length,
             hparams.n_mel_channels, hparams.sampling_rate, hparams.mel_fmin,
@@ -38,6 +38,7 @@ class TextMelLoader(torch.utils.data.Dataset):
             accent = self.get_text(text)
         text = self.get_text(text)
         mel = self.get_mel(audiopath)
+        #accentとtextの長さが同じか確認
         assert len(text) == len(accent), f'diff lengths text({len(text)}), accent({len(accent)})\n{text}\n{accent}\n{audiopath}'
         return (text, mel, accent)
 
@@ -87,7 +88,7 @@ class TextMelCollate():
         """Collate's training batch from normalized text and mel-spectrogram
         PARAMS
         ------
-        batch: [text_normalized, mel_normalized]
+        batch: [text_normalized, mel_normalized, accent_normalized]
         """
         # Right zero-pad all one-hot text sequences to max input length
         input_lengths, ids_sorted_decreasing = torch.sort(
@@ -105,12 +106,13 @@ class TextMelCollate():
             torch.LongTensor([len(x[2]) for x in batch]),
             dim=0, descending=True)
         max_accent_len = accent_lengths[0]
+        #max_accent_lenとmax_input_lenが等しいか確認
         assert max_accent_len == max_input_len, f'[batch]diff length accent({max_accent_len}) and input({max_input_len})'
 
         accent_padded = torch.LongTensor(len(batch), max_accent_len)
         accent_padded.zero_()
         for i in range(len(ids_sorted_decreasing_accent)):
-            accent = batch[ids_sorted_decreasing_accent[i]][0]
+            accent = batch[ids_sorted_decreasing_accent[i]][2]
             accent_padded[i, :accent.size(0)] = accent
 
         # Right zero-pad mel-spec
